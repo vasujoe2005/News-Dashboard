@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>News Aggregator</title>
+    <style>
+    :root{
+        --bg:#0f1724; --card:#0b1220; --muted:#94a3b8; --accent:#38bdf8;
+        --glass: rgba(255,255,255,0.03);
+    }
+    *{box-sizing:border-box}
+    body{
+        margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;
+        background:linear-gradient(180deg,#071024 0%, #071a2a 100%); color:#e6eef8; min-height:100vh;
+    }
+    .wrap{max-width:1100px;margin:24px auto;padding:18px}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between}
+    h1{margin:0;font-size:20px;letter-spacing:-0.5px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+    .input, select, button{
+        padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);
+        background:var(--glass); color:var(--muted); outline:none;
+    }
+    .input{min-width:240px;color:#e6eef8}
+    button{cursor:pointer;color:#041124;background:var(--accent);border:none}
+    .small-btn{padding:8px 10px;background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,0.04)}
+    .meta{font-size:12px;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(1,1fr);gap:14px;margin-top:18px}
+    @media(min-width:640px){.grid{grid-template-columns:repeat(2,1fr)}}
+    @media(min-width:980px){.grid{grid-template-columns:repeat(3,1fr)}}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+            border-radius:12px;padding:12px;display:flex;flex-direction:column;height:100%;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+    .thumb{width:100%;height:150px;object-fit:cover;border-radius:8px;margin-bottom:8px;background:#061020}
+    .title{font-weight:600;font-size:15px;margin:0 0 8px 0;color:#e6eef8}
+    .snippet{color:var(--muted);font-size:13px;flex:1;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+    .cardfoot{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+    .chip{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:999px;font-size:12px;color:var(--muted)}
+    .link{font-size:13px;color:var(--accent);text-decoration:none;margin-left:12px}
+    .footer-row{display:flex;justify-content:space-between;align-items:center;margin-top:18px;color:var(--muted)}
+    .page-controls{display:flex;gap:8px;align-items:center}
+    .empty{padding:30px;border-radius:10px;background:rgba(255,255,255,0.02);text-align:center;color:var(--muted)}
+    .spinner{width:18px;height:18px;border-radius:999px;border:3px solid rgba(255,255,255,0.06);border-top-color:var(--accent);animation:spin 1s linear infinite;display:inline-block;vertical-align:middle}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .note{font-size:13px;color:var(--muted);margin-top:10px}
+    </style>
+</head>
+<body>
+    <div class="wrap">
+    <header>
+        <div>
+        <h1>News Aggregator</h1>
+        </div>
+        <div style="text-align:right">
+        <button id="refreshBtn" title="Refresh feeds">Refresh</button>
+        <div class="meta" style="margin-top:6px">Cached: <span id="cacheTime">—</span></div>
+        </div>
+    </header>
+
+    <div class="controls" style="margin-top:18px">
+        <input id="searchInput" class="input" placeholder="Search headlines or content..." />
+        <select id="sourceSelect" class="input">
+        <option value="">All sources</option>
+        </select>
+        <select id="sortSelect" class="input" title="Sort">
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        </select>
+        <button id="clearCache" class="small-btn">Clear cache</button>
+        <div style="margin-left:auto" class="meta">Page size:
+        <select id="pageSizeSelect" class="input" style="display:inline-block;width:auto;margin-left:8px">
+            <option value="6">6</option><option value="12" selected>12</option><option value="24">24</option>
+        </select>
+        </div>
+    </div>
+
+    <div id="status" class="note"></div>
+
+    <main id="mainArea">
+        <div id="grid" class="grid" aria-live="polite"></div>
+
+        <div style="margin-top:18px" class="footer-row">
+        <div class="meta" id="resultsMeta">—</div>
+        <div class="page-controls">
+            <button id="prevBtn" class="small-btn">Prev</button>
+            <div class="meta" id="pageIndicator">Page 1/1</div>
+            <button id="nextBtn" class="small-btn">Next</button>
+        </div>
+        </div>
+    </main>
+
+    <div class="note" style="margin-top:14px">
+        <strong>Note:</strong> If articles fail to load, the public proxy may be rate-limited. You can run a simple local CORS proxy or host the file on a small server.
+    </div>
+    </div>
+
+    <script>
+    (function(){
+    const FEEDS = [
+        { id: 'bbc', name: 'BBC', url: 'http://feeds.bbci.co.uk/news/rss.xml' },
+        { id: 'reuters', name: 'Reuters', url: 'http://feeds.reuters.com/reuters/topNews' },
+        { id: 'nyt', name: 'NYTimes', url: 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml' },
+        { id: 'guardian', name: 'The Guardian', url: 'https://www.theguardian.com/world/rss' }
+    ];
+    const CORS_PROXY = 'https://api.allorigins.win/raw?url='; 
+    const CACHE_KEY = 'news_cache_v1';
+    const CACHE_TTL_MS = 10 * 60 * 1000;  
+
+    const grid = document.getElementById('grid');
+    const searchInput = document.getElementById('searchInput');
+    const sourceSelect = document.getElementById('sourceSelect');
+    const pageSizeSelect = document.getElementById('pageSizeSelect');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const pageIndicator = document.getElementById('pageIndicator');
+    const resultsMeta = document.getElementById('resultsMeta');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const cacheTime = document.getElementById('cacheTime');
+    const statusEl = document.getElementById('status');
+    const clearCacheBtn = document.getElementById('clearCache');
+    const sortSelect = document.getElementById('sortSelect');
+
+    let allArticles = [];
+    let filtered = [];
+    let page = 1;
+    let pageSize = Number(pageSizeSelect.value);
+
+    function setStatus(text, busy=false){
+        statusEl.textContent = text;
+        refreshBtn.disabled = busy;
+        if (busy) refreshBtn.innerHTML = '<span class="spinner"></span> Refreshing';
+        else refreshBtn.textContent = 'Refresh';
+    }
+
+    function saveCache(obj){
+        try{
+        localStorage.setItem(CACHE_KEY, JSON.stringify(obj));
+        updateCacheTime(obj.updatedAt);
+        }catch(e){}
+    }
+    function loadCache(){
+        try{
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        return obj;
+        }catch(e){ return null; }
+    }
+    function updateCacheTime(ts){
+        cacheTime.textContent = ts ? new Date(ts).toLocaleString() : '—';
+    }
+
+    function dedupeSort(arr, sortOrder='newest'){
+        const map = new Map();
+        for (const a of arr){
+        const key = a.link || a.id || (a.title + a.pubDate);
+        if (!map.has(key)) map.set(key, a);
+        }
+        const out = Array.from(map.values());
+        out.sort((A,B)=>{
+        const ta = A.pubDate ? new Date(A.pubDate).getTime() : 0;
+        const tb = B.pubDate ? new Date(B.pubDate).getTime() : 0;
+        return sortOrder === 'oldest' ? ta - tb : tb - ta;
+        });
+        return out;
+    }
+
+    function parseRSS(xmlText, feedMeta){
+        try{
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlText, 'text/xml');
+        const items = Array.from(doc.querySelectorAll('item, entry'));
+        const articles = items.map(it=>{
+            const title = (it.querySelector('title') && it.querySelector('title').textContent) || '(no title)';
+            const linkNode = it.querySelector('link');
+            let link = '';
+            if (linkNode){
+            link = linkNode.getAttribute && linkNode.getAttribute('href') ? linkNode.getAttribute('href') : linkNode.textContent;
+            } else {
+            const enclosure = it.querySelector('enclosure[url]');
+            link = enclosure ? enclosure.getAttribute('url') : '';
+            }
+            const pub = (it.querySelector('pubDate') && it.querySelector('pubDate').textContent)
+                    || (it.querySelector('published') && it.querySelector('published').textContent)
+                    || (it.querySelector('updated') && it.querySelector('updated').textContent)
+                    || null;
+            const desc = (it.querySelector('description') && it.querySelector('description').textContent)
+                        || (it.querySelector('summary') && it.querySelector('summary').textContent)
+                        || (it.querySelector('content') && it.querySelector('content').textContent)
+                        || '';
+            const enclosureImg = it.querySelector('enclosure[url]') ? it.querySelector('enclosure[url]').getAttribute('url') : null;
+            let image = enclosureImg;
+            if (!image){
+            const media = it.getElementsByTagNameNS('http://search.yahoo.com/mrss/','content')[0];
+            if (media && media.getAttribute) image = media.getAttribute('url');
+            }
+            return {
+            id: (it.querySelector('guid') && it.querySelector('guid').textContent) || link || title,
+            title: title.trim(),
+            link: link ? link.trim() : '',
+            pubDate: pub ? new Date(pub).toISOString() : null,
+            contentSnippet: stripHtml(desc).trim(),
+            source: feedMeta.name || feedMeta.id,
+            image: image
+            };
+        });
+        return articles;
+        }catch(e){
+        console.error('parse error', e);
+        return [];
+        }
+    }
+
+    function stripHtml(html){
+        if (!html) return '';
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        return tmp.textContent || tmp.innerText || '';
+    }
+
+    async function fetchFeed(feed){
+        const url = CORS_PROXY + encodeURIComponent(feed.url);
+        try{
+        const res = await fetch(url, {cache: 'no-store'});
+        if (!res.ok) throw new Error('Network response not ok: ' + res.status);
+        const text = await res.text();
+        return parseRSS(text, feed);
+        }catch(err){
+        console.warn('Feed failed:', feed.url, err.message);
+        return [];
+        }
+    }
+
+    async function fetchAllFeeds(showStatus=true){
+        if (showStatus) setStatus('Fetching feeds...', true);
+        const promises = FEEDS.map(f => fetchFeed(f));
+        const results = await Promise.all(promises);
+        const combined = results.flat();
+        const now = new Date().toISOString();
+        const deduped = dedupeSort(combined, sortSelect.value);
+        saveCache({ updatedAt: now, articles: deduped });
+        allArticles = deduped;
+        if (showStatus) setStatus('Feeds updated. ' + allArticles.length + ' articles.', false);
+        populateSourceSelect();
+        applyFilters();
+    }
+
+    function renderGrid(items){
+        grid.innerHTML = '';
+        if (!items.length){
+        grid.innerHTML = '<div class="empty">No articles found.</div>';
+        return;
+        }
+        const frag = document.createDocumentFragment();
+        for (const a of items){
+        const card = document.createElement('article');
+        card.className = 'card';
+
+        if (a.image){
+            const img = document.createElement('img');
+            img.className = 'thumb';
+            img.src = a.image;
+            img.alt = a.title;
+            img.loading = 'lazy';
+            card.appendChild(img);
+        }
+
+        const title = document.createElement('h3');
+        title.className = 'title';
+        title.textContent = a.title;
+        card.appendChild(title);
+
+        const snip = document.createElement('p');
+        snip.className = 'snippet';
+        snip.textContent = a.contentSnippet || '';
+        card.appendChild(snip);
+
+        const foot = document.createElement('div');
+        foot.className = 'cardfoot';
+        const chip = document.createElement('div');
+        chip.className = 'chip';
+        chip.textContent = a.source;
+        foot.appendChild(chip);
+
+        const dt = document.createElement('div');
+        dt.className = 'meta';
+        dt.textContent = a.pubDate ? new Date(a.pubDate).toLocaleString() : '';
+        foot.appendChild(dt);
+
+        card.appendChild(foot);
+
+        const linkRow = document.createElement('div');
+        linkRow.style.marginTop = '10px';
+        const read = document.createElement('a');
+        read.className = 'link';
+        read.href = a.link || '#';
+        read.target = '_blank';
+        read.rel = 'noopener noreferrer';
+        read.textContent = 'Read full article →';
+        linkRow.appendChild(read);
+        card.appendChild(linkRow);
+
+        frag.appendChild(card);
+        }
+        grid.appendChild(frag);
+    }
+
+    function populateSourceSelect(){
+        const existing = new Set(Array.from(sourceSelect.options).map(o=>o.value));
+        for (const f of FEEDS){
+        if (!existing.has(f.name)){
+            const opt = document.createElement('option');
+            opt.value = f.name;
+            opt.textContent = f.name;
+            sourceSelect.appendChild(opt);
+        }
+        }
+    }
+
+    function applyFilters(){
+        const q = searchInput.value.trim().toLowerCase();
+        const src = sourceSelect.value;
+        const sortOrder = sortSelect.value;
+        let arr = allArticles.slice();
+
+        if (q){
+        arr = arr.filter(a=>{
+            return (a.title && a.title.toLowerCase().includes(q)) ||
+                    (a.contentSnippet && a.contentSnippet.toLowerCase().includes(q));
+        });
+        }
+        if (src){
+        arr = arr.filter(a => String(a.source).toLowerCase() === String(src).toLowerCase());
+        }
+
+        arr = dedupeSort(arr, sortOrder);
+
+        filtered = arr;
+        page = 1;
+        updatePagination();
+        renderCurrentPage();
+    }
+
+    function renderCurrentPage(){
+        pageSize = Number(pageSizeSelect.value);
+        const total = filtered.length;
+        const pages = Math.max(1, Math.ceil(total / pageSize));
+        if (page > pages) page = pages;
+            const start = (page - 1) * pageSize;
+        const slice = filtered.slice(start, start + pageSize);
+        renderGrid(slice);
+        pageIndicator.textContent = `Page ${page}/${pages}`;
+        resultsMeta.textContent = `${total} articles`;
+        prevBtn.disabled = page <= 1;
+        nextBtn.disabled = page >= pages;
+    }
+
+    function updatePagination(){ renderCurrentPage(); }
+
+    searchInput.addEventListener('input', debounce(()=> applyFilters(), 350));
+    sourceSelect.addEventListener('change', ()=> applyFilters());
+    pageSizeSelect.addEventListener('change', ()=> { page = 1; applyFilters(); });
+    sortSelect.addEventListener('change', ()=> applyFilters());
+
+    prevBtn.addEventListener('click', ()=> { page = Math.max(1, page-1); renderCurrentPage(); });
+    nextBtn.addEventListener('click', ()=> { page = page + 1; renderCurrentPage(); });
+
+    refreshBtn.addEventListener('click', ()=> fetchAllFeeds(true));
+    clearCacheBtn.addEventListener('click', ()=>{
+        localStorage.removeItem(CACHE_KEY);
+        setStatus('Cache cleared. Refresh to reload feeds.', false);
+        cacheTime.textContent = '—';
+    });
+
+    (function init(){
+        const cached = loadCache();
+        if (cached && cached.articles && cached.updatedAt){
+        const age = Date.now() - new Date(cached.updatedAt).getTime();
+        allArticles = cached.articles;
+        populateSourceSelect();
+        applyFilters();
+        updateCacheTime(cached.updatedAt);
+        setStatus('Loaded from cache (' + Math.round(age/1000) + 's old).', false);
+        if (age > CACHE_TTL_MS) fetchAllFeeds(false);
+        } else {
+        fetchAllFeeds(true);
+        }
+    })();
+
+    function debounce(fn, wait=300){
+        let t;
+        return function(...a){ clearTimeout(t); t = setTimeout(()=> fn.apply(this,a), wait); };
+    }
+
+    })();
+    </script>
+</body>
+</html>
